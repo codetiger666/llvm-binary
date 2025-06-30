@@ -1,0 +1,123 @@
+name: Build Libclang
+
+on:
+  workflow_dispatch:
+    inputs:
+      ssh:
+        description: '是否开启ssh调试'
+        required: true
+        default: 'false'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+env:
+  LLVM_VERSION: "20.1.7"
+  CMAKE_VERSION: "2.31"
+  BUILD_TYPE: "Release"
+  INSTALL_DIR: "${{ github.workspace }}/install"
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout LLVM
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'
+        repository: 'llvm/llvm-project'
+        ref: llvmorg-${{ env.LLVM_VERSION }}
+
+    - name: SSH connection to Actions
+      uses: mxschmitt/action-tmate@v3
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false')
+
+    - name: Build
+      run: |
+        docker run --rm -v "${{ github.workspace }}:/workspace" \
+          ubuntu:20.04 bash -c '
+            set -e
+            apt update && \
+            DEBIAN_FRONTEND=noninteractive apt install -y ninja-build git wget gcc g++ python3 && \
+            wget https://github.com/Kitware/CMake/releases/download/v${{ env.CMAKE_VERSION }}/cmake-${{ env.CMAKE_VERSION }}-linux-x86_64.tar.gz && \
+            tar -xzf cmake-${{ env.CMAKE_VERSION }}-linux-x86_64.tar.gz && \
+            ./cmake-${{ env.CMAKE_VERSION }}-linux-x86_64/bin/cmake --version && \
+            mkdir -p build && \
+            ldd --version && \
+            cd /workspace && \
+            /cmake-${{ env.CMAKE_VERSION }}-linux-x86_64/bin/cmake -G Ninja \
+              -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+              -DCMAKE_INSTALL_PREFIX=/workspace/install \
+              -DLLVM_ENABLE_PROJECTS="clang" \
+              -DBUILD_SHARED_LIBS=OFF \
+              -DLLVM_BUILD_LLVM_DYLIB=OFF \
+              -DLLVM_LINK_LLVM_DYLIB=OFF \
+              -DCLANG_LINK_CLANG_DYLIB=OFF \
+              -DLLVM_ENABLE_BINDINGS=OFF \
+              -DLLVM_ENABLE_TERMINFO=OFF \
+              -DLLVM_ENABLE_ZLIB=OFF \
+              -DLLVM_ENABLE_ZSTD=OFF \
+              -DLLVM_ENABLE_RTTI=ON \
+              -DLLVM_ENABLE_PIC=ON \
+              -DLLVM_TARGETS_TO_BUILD="X86" \
+              -DCMAKE_CXX_FLAGS="-fPIC -static-libgcc -static-libstdc++" \
+              -DCMAKE_EXE_LINKER_FLAGS="-Wl,--as-needed" \
+              -DCMAKE_FIND_LIBRARY_SUFFIXES=".a;.so" \
+              -S llvm -B build && \
+            ninja -C build -j 8 install
+          '        
+
+    - name: Package
+      run: |
+        mkdir -p include
+        cp -r ${{ env.INSTALL_DIR }}/include/clang-c/* include
+        mkdir -p clang 
+        rm -rf clang/*
+        cp -ra ${{ env.INSTALL_DIR }}/lib/libclang* clang
+        mkdir llvm-${{ env.LLVM_VERSION }}
+        cp -ra ${{ env.INSTALL_DIR }}/* llvm-${{ env.LLVM_VERSION }}
+        tar -czvf include.tar.gz include
+        tar -czvf libclang.tar.gz clang
+        tar -zcvf llvm.tar.gz llvm-${{ env.LLVM_VERSION }}
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-assets
+        path: |
+          libclang.tar.gz
+          include.tar.gz
+          llvm.tar.gz
+
+  create-release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: release-assets
+        path: release-assets
+
+    - name: Release
+      uses: softprops/action-gh-release@master
+      continue-on-error: true
+      with:
+        tag_name: libclang-${{ env.LLVM_VERSION }}
+        release_name: libclang-${{ env.LLVM_VERSION }}
+        draft: false
+        prerelease: false
+        body: |
+          ## Standalone libclang ${{ env.LLVM_VERSION }}
+          
+          ### 包含三个独立文件：
+          1. **libclang.tar.gz** - 无外部依赖clang.so压缩包
+          2. **include.tar.gz** - clang-c头文件压缩包
+          2. **llvm.tar.gz** - llvm编译结果
+          
+        files: |
+          release-assets/*
