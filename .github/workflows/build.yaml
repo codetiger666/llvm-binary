@@ -107,7 +107,7 @@ jobs:
       uses: softprops/action-gh-release@master
       continue-on-error: true
       with:
-        tag_name: libclang-${{ env.LLVM_VERSION }}
+        tag_name: ${{ env.LLVM_VERSION }}
         release_name: libclang-${{ env.LLVM_VERSION }}
         draft: false
         prerelease: false
