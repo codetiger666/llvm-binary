@@ -14,7 +14,7 @@ on:
 
 env:
   LLVM_VERSION: "20.1.7"
-  CMAKE_VERSION: "2.31"
+  CMAKE_VERSION: "3.20.0"
   BUILD_TYPE: "Release"
   INSTALL_DIR: "${{ github.workspace }}/install"
 jobs:
@@ -118,6 +118,6 @@ jobs:
           1. **libclang.tar.gz** - 无外部依赖clang.so压缩包
           2. **include.tar.gz** - clang-c头文件压缩包
           2. **llvm.tar.gz** - llvm编译结果
-          
+
         files: |
           release-assets/*
